@@ -1,7 +1,7 @@
 # Guide for setting up BackupSecurity
 
 ## Requirements
-+ Need one computer with ubuntu 12.04 or higher
++ Need one computer with ubuntu 12.04+ or windows 7+
 + Need one android device with android 5.1 or higher
 + Need minimum quad core arm cpu for android device
 + Both android device and pc should be on same wifi network

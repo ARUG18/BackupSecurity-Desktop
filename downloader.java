@@ -1,12 +1,14 @@
 import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.FileWriter;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.URL;
 import java.net.URLConnection;
+import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.Scanner;
 
@@ -17,41 +19,165 @@ class downloader {
     private static String ftpFilePathPrefix = "ftp://192.168.0.1:12345/";
     //this is the path which when appended to above url will give us filestosync url on mobile device
     private static String ftpSyncFilePathSuffix = "BackupSecurity/filestosync.txt";
+    //this is the directory in which configs will be kept
+    private static String configPathPrefix = "configs/";
+    //this is the local path which when appended in front of above url will give syncedfiles path
+    private static String syncedFilesPathSuffix = "syncedfiles.txt";
     //this is the directory in which files will be synced
     private static String savePathPrefix = "downloads/";
     //this is the local path which when appended in front of above url will give filestosync path
     private static String savePathSuffix = "filestosync.txt";
     //this is an error count which is incrimented whenever a file fails to download
     private static int errcount = 0;
+    //record types
+    private static int TYPE_FILESTOSYNC = 0;
+    private static int TYPE_SYNCEDFILES = 1;
+
+    private static ArrayList<fileRecord> list_new, list_old;
 
     public static void main(String[] args) {
         //find ip of mobile device and store it
         String mob_ip = find_mobile_ip();
         ftpFilePathPrefix = "ftp://" + mob_ip + ":12345/";
-        System.out.println("ip of mobile is " + mob_ip);
+        System.out.print("\n==== ip of mobile is " + mob_ip+" ====");
         //download the filestosync from mobile device
         download_file(ftpSyncFilePathSuffix);
         //now parse each line of filestosync and download them all
         long start = System.currentTimeMillis();
+        StringBuilder sb = new StringBuilder();
         try {
-            //read all content from filestosync.txt
-            String content = new Scanner(new File(savePathPrefix + ftpSyncFilePathSuffix)).useDelimiter("\\Z").next();
+            //read all content from filestosync.txt and syncedfiles.txt
+            File syncedfiles = new File(configPathPrefix + syncedFilesPathSuffix);
+            String content_new = null, content_old = null;
+            content_new = new Scanner(new File(savePathPrefix + ftpSyncFilePathSuffix)).useDelimiter("\\Z").next();
+            if (syncedfiles.exists()) {
+                content_old = new Scanner(syncedfiles).useDelimiter("\\Z").next();
+            }
             //store each line separately at each index of arry
-            String[] ar = content.split("\n");
-            for (String sti : ar) {
-                //trim out the timestamp and separator part
-                String str = sti.substring(1, sti.indexOf("#$#$") - 1);
-                //replace the " " with "%20" before downloading files
-                str = str.replace(" ", "%20");
-                //System.out.println(str);
-                //lets give another attempt if any download fails
-                if (!download_file(str))
-                    download_file(str);
+            String[] ar_new = null, ar_old = null;
+            ar_new = content_new.split("\n");
+            list_new = new ArrayList<>();
+            System.out.print("\n==== parsing filestosync.txt now ====");
+            for (String str : ar_new) {
+                //lets parse all records and make list of fileRecords out of them
+                fileRecord r = new fileRecord();
+                r.path = str.substring(1, str.indexOf("#$#$") - 1);
+                r.raw = str;
+                r.rectype = TYPE_FILESTOSYNC;
+                String date_time_stamp = str.substring(str.indexOf("#$#$") + 5, str.length());
+                r.year = getInfoFromTimeDateStamp(date_time_stamp, 0);
+                r.month = getInfoFromTimeDateStamp(date_time_stamp, 1);
+                r.day = getInfoFromTimeDateStamp(date_time_stamp, 2);
+                r.hr = getInfoFromTimeDateStamp(date_time_stamp, 3);
+                r.min = getInfoFromTimeDateStamp(date_time_stamp, 4);
+                /*System.out.print("\nstr = " + str + "\npath = " + r.path + "\nrectype = " + r.rectype + " year = " + r.year +
+                        " month = " + r.month + " day = " + r.day + " hr = " + r.hr + " min = " + r.min);*/
+                list_new.add(r);
+            }
+            if (content_old != null) {
+                ar_old = content_old.split("\n");
+                System.out.print("\n==== parsing syncedfiles.txt now ====");
+                list_old = new ArrayList<>();
+                for (String str : ar_old) {
+                    //lets parse all records and make list of fileRecords out of them
+                    fileRecord r = new fileRecord();
+                    r.path = str.substring(1, str.indexOf("#$#$") - 1);
+                    r.rectype = TYPE_SYNCEDFILES;
+                    String date_time_stamp = str.substring(str.indexOf("#$#$") + 5, str.length());
+                    r.year = getInfoFromTimeDateStamp(date_time_stamp, 0);
+                    r.month = getInfoFromTimeDateStamp(date_time_stamp, 1);
+                    r.day = getInfoFromTimeDateStamp(date_time_stamp, 2);
+                    r.hr = getInfoFromTimeDateStamp(date_time_stamp, 3);
+                    r.min = getInfoFromTimeDateStamp(date_time_stamp, 4);
+                    r.success = str.substring(str.length() - 4, str.length()).equals("done");
+                    /*System.out.print("\nstr = " + str + "\npath = " + r.path + "\nrectype = " + r.rectype + " year = " + r.year +
+                            " month = " + r.month + " day = " + r.day + " hr = " + r.hr + " min = " + r.min + " success = " + r.success);*/
+                    list_old.add(r);
+                }
+            }
+            //lets compare old and new records and download accordingly
+            for (fileRecord r : list_new) {
+                //trim out the timestamp and separator part, just get path
+                String path = r.path;
+                String rawstring = r.raw;
+                boolean need_to_download = checkNeedToDownload(r);
+                boolean downloaded = false;
+                if (need_to_download) {
+                    //replace the " " with "%20" before downloading files
+                    path = path.replace(" ", "%20");
+                    //Try to download the file
+                    downloaded = download_file(path);
+                    //Try to download the file again if failed
+                    if (!downloaded) {
+                        downloaded = download_file(path);
+                    }
+                    //Giving up now, count this as an error
+                    if (!downloaded) {
+                        errcount++;
+                        System.out.print("\nFailed to downlaod " + r.path);
+                    }
+                } else {
+                    System.out.print("\nNo need to download " + r.path);
+                }
+
+                if ((!need_to_download) || (downloaded)) {
+                    rawstring += " $#$# done\n";
+                } else {
+                    rawstring += " $#$# failed\n";
+                }
+                //write new ar[i] into configs/syncedfiles.txt
+                sb.append(rawstring);
             }
             long end = System.currentTimeMillis();
-            System.out.println("====================================================");
-            System.out.println("Sync complete, errors = " + errcount + " time = " + ((end - start) / 60000) + " minutes");
-            System.out.println("====================================================");
+            generate_synced_list(syncedFilesPathSuffix, sb);
+            System.out.print("\n====================================================");
+            System.out.print("\nSync complete, errors = " + errcount + " time = " + ((end - start) / 60000) + " minutes");
+            System.out.print("\n====================================================\n");
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private static boolean checkNeedToDownload(fileRecord r) {
+        if (list_old == null || list_old.size() < 1) {
+            return true;
+        }
+        for (fileRecord fr : list_old) {
+            if (fr.path.equals(r.path)) {
+                //return false only if all date and time params match
+                return (fr.min != r.min) || (fr.hr != r.hr) || (fr.day != r.day) ||
+                        (fr.month != r.month) || (fr.year != r.year);
+            }
+        }
+        return true;
+    }
+
+    //this function parses 16 char time stamps like 2018-04-22 13:31
+    private static int getInfoFromTimeDateStamp(String dts, int i) {
+        switch (i) {
+            case 0: //year
+                return Integer.parseInt(dts.substring(0, 4));
+            case 1: //month
+                return Integer.parseInt(dts.substring(5, 7));
+            case 2: //day
+                return Integer.parseInt(dts.substring(8, 10));
+            case 3: //hr
+                return Integer.parseInt(dts.substring(11, 13));
+            case 4: //min
+                return Integer.parseInt(dts.substring(14, 16));
+        }
+        return -1;
+    }
+
+    private static void generate_synced_list(String s, StringBuilder sb) {
+        try {
+            File root = new File(configPathPrefix + s);
+            root.getParentFile().mkdirs();
+            FileWriter writer = new FileWriter(root);
+            writer.append(sb.toString());
+            writer.flush();
+            writer.close();
+            System.out.print("\nsyncedfiles.txt has been generated !");
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -61,7 +187,7 @@ class downloader {
         int count;
         try {
             String ust = ftpFilePathPrefix + st;
-            //System.out.println("Downloading from " + ust);
+            //System.out.print("\nDownloading from " + ust);
             //open the connection
             URL url = new URL(ust);
             URLConnection conection = url.openConnection();
@@ -70,7 +196,7 @@ class downloader {
             savePathSuffix = st.replace("%20", " ");
             //open input stream on the url
             InputStream input = new BufferedInputStream(url.openStream(), 8192);
-            System.out.println("Trying to get " + savePathPrefix + savePathSuffix);
+            System.out.print("\nTrying to get " + savePathPrefix + savePathSuffix);
             File yourFile = new File(savePathPrefix + savePathSuffix);
             //create directories if required
             yourFile.getParentFile().mkdirs();
@@ -94,14 +220,12 @@ class downloader {
             //closing streams
             output.close();
             input.close();
-            System.out.println("Done !");
+            System.out.print("\nDone !");
             //return true so that we know it's success
             return true;
 
         } catch (Exception e) {
-            System.out.print("Failed !");
-            //it's a failure
-            errcount++;
+            System.out.print("\nFailed !");
             //print the reason of failure
             e.printStackTrace();
             //return false so that we know a failure
@@ -152,13 +276,13 @@ class downloader {
     private static synchronized boolean check_url(String st) {
         int count;
         try {
-            System.out.println("Trying from " + st);
+            System.out.print("\nTrying from " + st);
             URL url = new URL(st);
             URLConnection conection = url.openConnection();
-            conection.setConnectTimeout(4000);
+            conection.setConnectTimeout(2000);
             conection.connect();
             InputStream input = new BufferedInputStream(url.openStream(), 8192);
-            File yourFile = new File("temp/" + "temp.txt");
+            File yourFile = new File("configs/" + "temp.txt");
             yourFile.getParentFile().mkdirs();
             OutputStream output = new FileOutputStream(yourFile);
             byte data[] = new byte[BUFFER_SIZE];
@@ -179,4 +303,17 @@ class downloader {
         }
     }
 
+}
+
+class fileRecord
+{
+    String path = null;
+    String raw = null;
+    boolean success = false;
+    int rectype = -1;
+    int year = -1;
+    int month = -1;
+    int day = -1;
+    int hr = -1;
+    int min = -1;
 }

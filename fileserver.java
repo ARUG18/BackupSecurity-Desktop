@@ -11,7 +11,7 @@ public class fileserver {
         ServerSocket serverSocket = new ServerSocket(12346);
         Socket socket = serverSocket.accept();
         System.out.println("Accepted connection : " + socket);
-        File transferFile = new File("temp.txt");
+        File transferFile = new File("configs/syncedfiles.txt");
         byte[] bytearray = new byte[(int) transferFile.length()];
         FileInputStream fin = new FileInputStream(transferFile);
         BufferedInputStream bin = new BufferedInputStream(fin);
