@@ -1,3 +1,4 @@
+import java.awt.Color;
 import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -12,9 +13,16 @@ import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.Scanner;
 
+import javax.swing.JOptionPane;
+
 class downloader {
     //this is for byte array when downloading
     private static final int BUFFER_SIZE = 2048;
+    public static boolean pause = false;
+    public static boolean found = false;
+    public static int count = 0;
+    public static int length = 0;
+    static downloaderUI obj = new downloaderUI();
     //just dummy ftpFilePathPrefix value, main will update it later
     private static String ftpFilePathPrefix = "ftp://192.168.0.1:12345/";
     //this is the path which when appended to above url will give us filestosync url on mobile device
@@ -32,14 +40,21 @@ class downloader {
     //record types
     private static int TYPE_FILESTOSYNC = 0;
     private static int TYPE_SYNCEDFILES = 1;
-
     private static ArrayList<fileRecord> list_new, list_old;
 
     public static void main(String[] args) {
+
+        obj.initialise();
+        obj.pagestructure();
+        
         //find ip of mobile device and store it
         String mob_ip = find_mobile_ip();
         ftpFilePathPrefix = "ftp://" + mob_ip + ":12345/";
-        System.out.print("\n==== ip of mobile is " + mob_ip+" ====");
+        found = true;
+        obj.l2.setBounds(220, 150, 400, 100);
+        obj.l2.setForeground(Color.green);
+        obj.l2.setText("CONNECTED");
+        System.out.print("\n==== ip of mobile is " + mob_ip + " ====");
         //download the filestosync from mobile device
         download_file(ftpSyncFilePathSuffix);
         //now parse each line of filestosync and download them all
@@ -61,6 +76,7 @@ class downloader {
             for (String str : ar_new) {
                 //lets parse all records and make list of fileRecords out of them
                 fileRecord r = new fileRecord();
+                count += 1;
                 r.path = str.substring(1, str.indexOf("#$#$") - 1);
                 r.raw = str;
                 r.rectype = TYPE_FILESTOSYNC;
@@ -73,7 +89,10 @@ class downloader {
                 /*System.out.print("\nstr = " + str + "\npath = " + r.path + "\nrectype = " + r.rectype + " year = " + r.year +
                         " month = " + r.month + " day = " + r.day + " hr = " + r.hr + " min = " + r.min);*/
                 list_new.add(r);
+
             }
+            obj.bar.setMinimum(0);
+            obj.bar.setMaximum(count);
             if (content_old != null) {
                 ar_old = content_old.split("\n");
                 System.out.print("\n==== parsing syncedfiles.txt now ====");
@@ -93,6 +112,7 @@ class downloader {
                     /*System.out.print("\nstr = " + str + "\npath = " + r.path + "\nrectype = " + r.rectype + " year = " + r.year +
                             " month = " + r.month + " day = " + r.day + " hr = " + r.hr + " min = " + r.min + " success = " + r.success);*/
                     list_old.add(r);
+
                 }
             }
             //lets compare old and new records and download accordingly
@@ -103,6 +123,8 @@ class downloader {
                 boolean need_to_download = checkNeedToDownload(r);
                 boolean downloaded = false;
                 if (need_to_download) {
+                    length += 1;
+                    obj.l8.setText(String.valueOf(length));
                     //replace the " " with "%20" before downloading files
                     path = path.replace(" ", "%20");
                     //Try to download the file
@@ -117,6 +139,8 @@ class downloader {
                         System.out.print("\nFailed to downlaod " + r.path);
                     }
                 } else {
+
+
                     System.out.print("\nNo need to download " + r.path);
                 }
 
@@ -131,8 +155,14 @@ class downloader {
             long end = System.currentTimeMillis();
             generate_synced_list(syncedFilesPathSuffix, sb);
             System.out.print("\n====================================================");
-            System.out.print("\nSync complete, errors = " + errcount + " time = " + ((end - start) / 60000) + " minutes");
+            System.out.print("\nSync complete, errors = " + errcount + " time = " + ((end - start) / 1000) + " seconds");
             System.out.print("\n====================================================\n");
+            float time = ((end - start) / 1000);
+            obj.bar.setValue(count);
+            obj.l5.setText(time + " seconds");
+            obj.l6.setText("12 hours");
+            JOptionPane.showMessageDialog(null, "Backup Completed Successfully");
+
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -140,6 +170,7 @@ class downloader {
 
     private static boolean checkNeedToDownload(fileRecord r) {
         if (list_old == null || list_old.size() < 1) {
+
             return true;
         }
         for (fileRecord fr : list_old) {
@@ -185,6 +216,7 @@ class downloader {
 
     private static synchronized boolean download_file(String st) {
         int count;
+        while (pause == true) ;
         try {
             String ust = ftpFilePathPrefix + st;
             //System.out.print("\nDownloading from " + ust);
@@ -221,11 +253,17 @@ class downloader {
             output.close();
             input.close();
             System.out.print("\nDone !");
+
+            obj.bar.setValue(length);
+
             //return true so that we know it's success
             return true;
-
         } catch (Exception e) {
             System.out.print("\nFailed !");
+            obj.bar.setString("Error");
+            obj.l2.setBounds(160, 150, 400, 100);
+            obj.l2.setText("Connection Refused");
+            obj.l2.setForeground(Color.red);
             //print the reason of failure
             e.printStackTrace();
             //return false so that we know a failure
@@ -266,6 +304,10 @@ class downloader {
         while ((!down) && (i <= 255)) {
             i++;
             down = check_url("ftp://" + prefix + i + ":12345/BackupSecurity/filestosync.txt");
+            while (pause == true) {
+                if (pause == false) break;
+            }
+            ;
         }
         return prefix + i;
     }
@@ -305,8 +347,7 @@ class downloader {
 
 }
 
-class fileRecord
-{
+class fileRecord {
     String path = null;
     String raw = null;
     boolean success = false;
