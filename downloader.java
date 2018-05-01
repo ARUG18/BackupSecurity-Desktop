@@ -18,9 +18,9 @@ import javax.swing.JOptionPane;
 class downloader {
     //this is for byte array when downloading
     private static final int BUFFER_SIZE = 2048;
-    public static boolean pause = false;
-    public static boolean found = false;
-	//prepare downloader ui
+    //this is a counter for progress of synced files
+    public static int synced = 0;
+    //prepare downloader ui
     static downloaderUI obj = new downloaderUI();
     //just dummy ftpFilePathPrefix value, main will update it later
     private static String ftpFilePathPrefix = "ftp://192.168.0.1:12345/";
@@ -34,28 +34,25 @@ class downloader {
     private static String savePathPrefix = "downloads/";
     //this is the local path which when appended in front of above url will give filestosync path
     private static String savePathSuffix = "filestosync.txt";
-	//this is a counter for progress of synced files
-    public static int synced = 0;
     //this is an error count which is incrimented whenever a file fails to download
     private static int errcount = 0;
-    //this is an error count which is incrimented whenever a file fails to download
+    //this is an error count limit, sync gives fail error if this exceeds
     private static int errcount_limit = 20;
     //record types
     private static int TYPE_FILESTOSYNC = 0;
     private static int TYPE_SYNCEDFILES = 1;
-	//new is the latest list from mobile, old is the one we make from our data and tosync is for downloading
+    //new is the latest list from mobile, old is the one we make from our data and tosync is for downloading
     private static ArrayList<fileRecord> list_new, list_old, list_tosync;
 
     public static void main(String[] args) {
 
-		//prepare the gui
+        //prepare the gui
         obj.initialise();
         obj.pagestructure();
 
         //find ip of mobile device and store it
         String mob_ip = find_mobile_ip();
         ftpFilePathPrefix = "ftp://" + mob_ip + ":12345/";
-        found = true;
         obj.l2.setBounds(150, 150, 400, 100);
         obj.l2.setForeground(Color.green);
         obj.l2.setText("CONNECTED");
@@ -70,7 +67,7 @@ class downloader {
             File syncedfiles = new File(configPathPrefix + syncedFilesPathSuffix);
             String content_new = null, content_old = null;
             content_new = new Scanner(new File(savePathPrefix + ftpSyncFilePathSuffix)).useDelimiter("\\Z").next();
-			//read all content from syncedfiles.txt if it exists
+            //read all content from syncedfiles.txt if it exists
             if (syncedfiles.exists()) {
                 content_old = new Scanner(syncedfiles).useDelimiter("\\Z").next();
             }
@@ -98,7 +95,7 @@ class downloader {
             }
             //confirm if last sync config is not null
             if (content_old != null) {
-				//store each line separately at each index of ar_old
+                //store each line separately at each index of ar_old
                 ar_old = content_old.split("\n");
                 System.out.print("\n==== parsing syncedfiles.txt now ====");
                 list_old = new ArrayList<>();
@@ -121,7 +118,7 @@ class downloader {
                 }
             }
             //lets compare old and new records to prepare list_tosync
-			list_tosync = new ArrayList<>();
+            list_tosync = new ArrayList<>();
             for (fileRecord r : list_new) {
                 //trim out the timestamp and separator part, just get path
                 String rawstring = r.raw;
@@ -168,8 +165,8 @@ class downloader {
                     }
                     rawstring += " $#$# failed\n";
                 }
-				obj.bar.setValue(synced+errcount);
-				obj.bar.setString((100*(synced+errcount)/list_tosync.size())+" %");
+                obj.bar.setValue(synced + errcount);
+                obj.bar.setString((100 * (synced + errcount) / list_tosync.size()) + " %");
                 sb.append(rawstring);
             }
 
@@ -238,7 +235,6 @@ class downloader {
 
     private static synchronized boolean download_file(String st) {
         int count;
-        while (pause == true) ;
         try {
             String ust = ftpFilePathPrefix + st;
             //System.out.print("\nDownloading from " + ust);
@@ -314,16 +310,18 @@ class downloader {
         String own_ip = find_own_ip();
         //since we know first 3 blocks of pc's ipv4 will be same as mobile's ipv4
         String prefix = own_ip.substring(1, own_ip.lastIndexOf('.') + 1);
-        boolean down = false;
         int i = 0;
         //as soon as we find that download of filestosync is successful, we know that's our mobile device's ip.
-        while ((!down) && (i <= 255)) {
-            i++;
-            down = check_url("ftp://" + prefix + i + ":12345/BackupSecurity/filestosync.txt");
-            while (pause == true) {
-                if (pause == false) break;
+        while (i < 128) {
+            boolean down = check_url("ftp://" + prefix + i + ":12345/BackupSecurity/filestosync.txt");
+            if (down) {
+                return (prefix + i);
             }
-            ;
+            down = check_url("ftp://" + prefix + (255 - i) + ":12345/BackupSecurity/filestosync.txt");
+            if (down) {
+                return (prefix + (255 - i));
+            }
+            i++;
         }
         return prefix + i;
     }

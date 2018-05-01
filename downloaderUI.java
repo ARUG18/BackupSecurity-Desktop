@@ -28,7 +28,7 @@ public class downloaderUI implements ActionListener {
         p1.setLayout(null);
         frame.add(p1);
         l2 = new JLabel("Waiting for connection");
-        b2 = new JButton("Stop Backup");
+        b2 = new JButton("Stop Backup Service");
         l3 = new JLabel("Total Time: ");
         b2.addActionListener(this);
         l1 = new JLabel("Backup & Security");
@@ -72,7 +72,7 @@ public class downloaderUI implements ActionListener {
     @Override
     public void actionPerformed(ActionEvent e) {
         if (e.getSource() == b2) {
-            obj2.pause = true;
+			System.exit(0);
         }
     }
 
