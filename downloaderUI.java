@@ -63,7 +63,7 @@ public class downloaderUI implements ActionListener {
         p1.add(b2);
         bar = new JProgressBar();
         bar.setBounds(150, 300, 400, 30);
-        bar.setString("Completed %");
+        bar.setString("0 %");
         bar.setValue(0);
         bar.setStringPainted(true);
         p1.add(bar);

@@ -20,8 +20,7 @@ class downloader {
     private static final int BUFFER_SIZE = 2048;
     public static boolean pause = false;
     public static boolean found = false;
-    public static int count = 0;
-    public static int length = 0;
+	//prepare downloader ui
     static downloaderUI obj = new downloaderUI();
     //just dummy ftpFilePathPrefix value, main will update it later
     private static String ftpFilePathPrefix = "ftp://192.168.0.1:12345/";
@@ -35,48 +34,54 @@ class downloader {
     private static String savePathPrefix = "downloads/";
     //this is the local path which when appended in front of above url will give filestosync path
     private static String savePathSuffix = "filestosync.txt";
+	//this is a counter for progress of synced files
+    public static int synced = 0;
     //this is an error count which is incrimented whenever a file fails to download
     private static int errcount = 0;
+    //this is an error count which is incrimented whenever a file fails to download
+    private static int errcount_limit = 20;
     //record types
     private static int TYPE_FILESTOSYNC = 0;
     private static int TYPE_SYNCEDFILES = 1;
-    private static ArrayList<fileRecord> list_new, list_old;
+	//new is the latest list from mobile, old is the one we make from our data and tosync is for downloading
+    private static ArrayList<fileRecord> list_new, list_old, list_tosync;
 
     public static void main(String[] args) {
 
+		//prepare the gui
         obj.initialise();
         obj.pagestructure();
-        
+
         //find ip of mobile device and store it
         String mob_ip = find_mobile_ip();
         ftpFilePathPrefix = "ftp://" + mob_ip + ":12345/";
         found = true;
-        obj.l2.setBounds(220, 150, 400, 100);
+        obj.l2.setBounds(150, 150, 400, 100);
         obj.l2.setForeground(Color.green);
         obj.l2.setText("CONNECTED");
         System.out.print("\n==== ip of mobile is " + mob_ip + " ====");
         //download the filestosync from mobile device
         download_file(ftpSyncFilePathSuffix);
-        //now parse each line of filestosync and download them all
+        //note the start time and prepare to start the sync
         long start = System.currentTimeMillis();
         StringBuilder sb = new StringBuilder();
         try {
-            //read all content from filestosync.txt and syncedfiles.txt
+            //read all content from filestosync.txt
             File syncedfiles = new File(configPathPrefix + syncedFilesPathSuffix);
             String content_new = null, content_old = null;
             content_new = new Scanner(new File(savePathPrefix + ftpSyncFilePathSuffix)).useDelimiter("\\Z").next();
+			//read all content from syncedfiles.txt if it exists
             if (syncedfiles.exists()) {
                 content_old = new Scanner(syncedfiles).useDelimiter("\\Z").next();
             }
-            //store each line separately at each index of arry
+            //store each line separately at each index of ar_new
             String[] ar_new = null, ar_old = null;
             ar_new = content_new.split("\n");
             list_new = new ArrayList<>();
             System.out.print("\n==== parsing filestosync.txt now ====");
+            //lets parse the array and make list of fileRecords out of them
             for (String str : ar_new) {
-                //lets parse all records and make list of fileRecords out of them
                 fileRecord r = new fileRecord();
-                count += 1;
                 r.path = str.substring(1, str.indexOf("#$#$") - 1);
                 r.raw = str;
                 r.rectype = TYPE_FILESTOSYNC;
@@ -91,14 +96,14 @@ class downloader {
                 list_new.add(r);
 
             }
-            obj.bar.setMinimum(0);
-            obj.bar.setMaximum(count);
+            //confirm if last sync config is not null
             if (content_old != null) {
+				//store each line separately at each index of ar_old
                 ar_old = content_old.split("\n");
                 System.out.print("\n==== parsing syncedfiles.txt now ====");
                 list_old = new ArrayList<>();
+                //lets parse the array and make list of fileRecords out of them
                 for (String str : ar_old) {
-                    //lets parse all records and make list of fileRecords out of them
                     fileRecord r = new fileRecord();
                     r.path = str.substring(1, str.indexOf("#$#$") - 1);
                     r.rectype = TYPE_SYNCEDFILES;
@@ -115,53 +120,70 @@ class downloader {
 
                 }
             }
-            //lets compare old and new records and download accordingly
+            //lets compare old and new records to prepare list_tosync
+			list_tosync = new ArrayList<>();
             for (fileRecord r : list_new) {
                 //trim out the timestamp and separator part, just get path
-                String path = r.path;
                 String rawstring = r.raw;
                 boolean need_to_download = checkNeedToDownload(r);
-                boolean downloaded = false;
                 if (need_to_download) {
-                    length += 1;
-                    obj.l7.setText(obj.l7_prefix + String.valueOf(length));
-                    //replace the " " with "%20" before downloading files
-                    path = path.replace(" ", "%20");
-                    //Try to download the file
-                    downloaded = download_file(path);
-                    //Try to download the file again if failed
-                    if (!downloaded) {
-                        downloaded = download_file(path);
-                    }
-                    //Giving up now, count this as an error
-                    if (!downloaded) {
-                        errcount++;
-                        System.out.print("\nFailed to downlaod " + r.path);
-                    }
+                    list_tosync.add(r);
                 } else {
-
-
                     System.out.print("\nNo need to download " + r.path);
-                }
-
-                if ((!need_to_download) || (downloaded)) {
                     rawstring += " $#$# done\n";
+                    sb.append(rawstring);
+                }
+            }
+            //prepare the progress bar
+            obj.bar.setMinimum(0);
+            obj.bar.setMaximum(list_tosync.size());
+            //start downloading files which are needed
+            for (fileRecord f : list_tosync) {
+                String path = f.path;
+                String rawstring = f.raw;
+                boolean downloaded = false;
+                //replace the " " with "%20" before downloading files
+                path = path.replace(" ", "%20");
+                //Try to download the file
+                downloaded = download_file(path);
+                //Try to download the file again if failed
+                if (!downloaded) {
+                    downloaded = download_file(path);
+                }
+                //Giving up now, count this as an error
+                if (downloaded) {
+                    synced++;
+                    rawstring += " $#$# done\n";
+                    obj.l7.setText(obj.l7_prefix + String.valueOf(synced));
                 } else {
+                    errcount++;
+                    System.out.print("\nFailed to downlaod " + f.path);
+                    if (errcount >= errcount_limit) {
+                        //stop it, too many errors
+                        obj.bar.setString("Error");
+                        obj.l2.setBounds(150, 150, 400, 100);
+                        obj.l2.setText("Too many errors !");
+                        obj.l2.setForeground(Color.red);
+                        break;
+                    }
                     rawstring += " $#$# failed\n";
                 }
-                //write new ar[i] into configs/syncedfiles.txt
+				obj.bar.setValue(synced+errcount);
+				obj.bar.setString((100*(synced+errcount)/list_tosync.size())+" %");
                 sb.append(rawstring);
             }
+
             long end = System.currentTimeMillis();
             generate_synced_list(syncedFilesPathSuffix, sb);
             System.out.print("\n====================================================");
             System.out.print("\nSync complete, errors = " + errcount + " time = " + ((end - start) / 1000) + " seconds");
             System.out.print("\n====================================================\n");
             float time = ((end - start) / 1000);
-            obj.bar.setValue(count);
             obj.l3.setText(obj.l3_prefix + time + " seconds");
             obj.l4.setText(obj.l4_prefix + "12 hours");
-            JOptionPane.showMessageDialog(null, "Backup Completed Successfully");
+            if (errcount < errcount_limit) {
+                JOptionPane.showMessageDialog(null, "Backup Completed Successfully");
+            }
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -254,16 +276,10 @@ class downloader {
             input.close();
             System.out.print("\nDone !");
 
-            obj.bar.setValue(length);
-
             //return true so that we know it's success
             return true;
         } catch (Exception e) {
             System.out.print("\nFailed !");
-            obj.bar.setString("Error");
-            obj.l2.setBounds(160, 150, 400, 100);
-            obj.l2.setText("Connection Refused");
-            obj.l2.setForeground(Color.red);
             //print the reason of failure
             e.printStackTrace();
             //return false so that we know a failure
