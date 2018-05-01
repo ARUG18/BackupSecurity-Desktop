@@ -124,7 +124,7 @@ class downloader {
                 boolean downloaded = false;
                 if (need_to_download) {
                     length += 1;
-                    obj.l8.setText(String.valueOf(length));
+                    obj.l7.setText(obj.l7_prefix + String.valueOf(length));
                     //replace the " " with "%20" before downloading files
                     path = path.replace(" ", "%20");
                     //Try to download the file
@@ -159,8 +159,8 @@ class downloader {
             System.out.print("\n====================================================\n");
             float time = ((end - start) / 1000);
             obj.bar.setValue(count);
-            obj.l5.setText(time + " seconds");
-            obj.l6.setText("12 hours");
+            obj.l3.setText(obj.l3_prefix + time + " seconds");
+            obj.l4.setText(obj.l4_prefix + "12 hours");
             JOptionPane.showMessageDialog(null, "Backup Completed Successfully");
 
         } catch (Exception e) {
