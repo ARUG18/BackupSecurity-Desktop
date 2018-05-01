@@ -45,11 +45,14 @@ class downloader {
     private static ArrayList<fileRecord> list_new, list_old, list_tosync;
 
     public static void main(String[] args) {
-
         //prepare the gui
         obj.initialise();
         obj.pagestructure();
+	start_backup_service();
+    }
 
+    //separating this from main so that this can be called again after 12/24hr standby
+    public static void start_backup_service() {
         //find ip of mobile device and store it
         String mob_ip = find_mobile_ip();
         ftpFilePathPrefix = "ftp://" + mob_ip + ":12345/";
@@ -323,7 +326,8 @@ class downloader {
             }
             i++;
         }
-        return prefix + i;
+	//find fucking ip again and again till found
+        return find_mobile_ip();
     }
 
     /*this method tries to download file from any url into temp/temp.txt, returns true if success,

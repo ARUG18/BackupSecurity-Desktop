@@ -6,16 +6,20 @@
 + Need minimum quad core arm cpu for android device
 + Both android device and pc should be on same wifi network
 
-## Instructions
-+ Download and install [BackupSecurity.apk](https://raw.githubusercontent.com/ARUG18/BackupSecurity/master/app.apk) first
-+ Open the app and press prepare config button, this will prepare filestosync.txt
-+ Now click the start server button to start the ftp server on android
-+ Now compile and run [downloader.java](https://raw.githubusercontent.com/ARUG18/BackupSecurity-Desktop/master/downloader.java), this should start finding your mobile ip
-+ Downloading will start as soon as mobile ip is found
+## Instructions (for users)
++ Download and install [BackupSecurity.apk](https://raw.githubusercontent.com/ARUG18/BackupSecurity/master/app.apk) on your android device first
++ Open the app and configure settings as you wish
++ Now run [BackupSecurity.jar](https://raw.githubusercontent.com/ARUG18/BackupSecurity-Desktop/master/BackupSecurity.jar), this should start backup service
++ First backup could take long time
 
-## Todo
-+ Need to implement similar algo to find pc's local ip from mobile
-+ Need the mobile app to read acknowledgement.txt from pc and generate next filestosync.txt accordingly
-+ Stats like number of files changed today or total size or redundancy detection can be done
-+ Need to make some gui for both desktop and android side applications
-+ All the security stuff
+## Instructions (for developers)
++ Get source for android app [here](https://github.com/ARUG18/BackupSecurity)
++ Get source for desktop side program [here](https://github.com/ARUG18/BackupSecurity-Desktop)
++ Compile android app with android studio and install it
++ To compile desktop side program, first compile classes, run >> javac *.java
++ Then to make executable jar, run >> jar cfm BackupSecurity.jar manifest.txt *.class
+
+## Todo list
++ Need to add backup time interval options in desktop side program
++ Need to turn off ftp server on mobile when it's not needed
++ Something more for improving security functionality
