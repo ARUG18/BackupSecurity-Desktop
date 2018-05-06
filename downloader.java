@@ -16,12 +16,15 @@ import java.util.Scanner;
 import javax.swing.JOptionPane;
 
 class downloader {
+    final static int backup_interval_minutes = 4;
     //this is for byte array when downloading
-    private static final int BUFFER_SIZE = 2048;
-    //this is a counter for progress of synced files
-    public static int synced = 0;
+    private static final int BUFFER_SIZE = 65536;
     //prepare downloader ui
     static downloaderUI obj = new downloaderUI();
+    static StringBuilder sb;
+    static long last_backup;
+    //this is a counter for progress of synced files
+    private static int synced = 0;
     //just dummy ftpFilePathPrefix value, main will update it later
     private static String ftpFilePathPrefix = "ftp://192.168.0.1:12345/";
     //this is the path which when appended to above url will give us filestosync url on mobile device
@@ -48,23 +51,30 @@ class downloader {
         //prepare the gui
         obj.initialise();
         obj.pagestructure();
-	start_backup_service();
+        start_backup_service();
     }
 
     //separating this from main so that this can be called again after 12/24hr standby
-    public static void start_backup_service() {
+    static void start_backup_service() {
+        errcount = 0;
+        synced = 0;
+        obj.bar.setValue(0);
+        obj.bar.setString("0 %");
+        obj.l7.setText(obj.l7_prefix + synced);
         //find ip of mobile device and store it
+        obj.l2.setForeground(Color.red);
+        obj.l2.setText("Waiting for connection");
         String mob_ip = find_mobile_ip();
         ftpFilePathPrefix = "ftp://" + mob_ip + ":12345/";
         obj.l2.setBounds(150, 150, 400, 100);
-        obj.l2.setForeground(Color.green);
+        obj.l2.setForeground(new Color(90, 145, 90));
         obj.l2.setText("CONNECTED");
         System.out.print("\n==== ip of mobile is " + mob_ip + " ====");
         //download the filestosync from mobile device
         download_file(ftpSyncFilePathSuffix);
         //note the start time and prepare to start the sync
         long start = System.currentTimeMillis();
-        StringBuilder sb = new StringBuilder();
+        sb = new StringBuilder();
         try {
             //read all content from filestosync.txt
             File syncedfiles = new File(configPathPrefix + syncedFilesPathSuffix);
@@ -137,11 +147,19 @@ class downloader {
             //prepare the progress bar
             obj.bar.setMinimum(0);
             obj.bar.setMaximum(list_tosync.size());
+            obj.l3.setText(obj.l3_prefix + " ongoing");
+            obj.l4.setText(obj.l4_prefix + " ongoing");
+
+            if (list_tosync.size() == 0) {
+                obj.bar.setMinimum(0);
+                obj.bar.setMaximum(1);
+                obj.bar.setValue(1);
+                obj.bar.setString("100 %");
+            }
             //start downloading files which are needed
-            for (fileRecord f : list_tosync) {
+            for (final fileRecord f : list_tosync) {
                 String path = f.path;
-                String rawstring = f.raw;
-                boolean downloaded = false;
+                boolean downloaded;
                 //replace the " " with "%20" before downloading files
                 path = path.replace(" ", "%20");
                 //Try to download the file
@@ -150,44 +168,70 @@ class downloader {
                 if (!downloaded) {
                     downloaded = download_file(path);
                 }
-                //Giving up now, count this as an error
-                if (downloaded) {
-                    synced++;
-                    rawstring += " $#$# done\n";
-                    obj.l7.setText(obj.l7_prefix + String.valueOf(synced));
-                } else {
-                    errcount++;
-                    System.out.print("\nFailed to downlaod " + f.path);
-                    if (errcount >= errcount_limit) {
-                        //stop it, too many errors
-                        obj.bar.setString("Error");
-                        obj.l2.setBounds(150, 150, 400, 100);
-                        obj.l2.setText("Too many errors !");
-                        obj.l2.setForeground(Color.red);
-                        break;
+                final boolean downloaded_f = downloaded;
+                Thread progress_updater = new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        String rawstring = f.raw;
+                        if (downloaded_f) {
+                            synced++;
+                            rawstring += " $#$# done\n";
+                            obj.l7.setText(obj.l7_prefix + synced);
+                        } else {
+                            errcount++;
+                            System.out.print("\nFailed to downlaod " + f.path);
+                            if (errcount >= errcount_limit) {
+                                //stop it, too many errors
+                                obj.bar.setString("Error");
+                                obj.l2.setBounds(150, 150, 400, 100);
+                                obj.l2.setText("Too many errors !");
+                                obj.l2.setForeground(Color.red);
+                            }
+                            rawstring += " $#$# failed\n";
+                        }
+                        obj.bar.setValue(synced + errcount);
+                        obj.bar.setString((100 * (synced + errcount) / list_tosync.size()) + " %");
+                        sb.append(rawstring);
                     }
-                    rawstring += " $#$# failed\n";
+                });
+                progress_updater.start();
+                if (errcount >= errcount_limit) {
+                    break;
                 }
-                obj.bar.setValue(synced + errcount);
-                obj.bar.setString((100 * (synced + errcount) / list_tosync.size()) + " %");
-                sb.append(rawstring);
             }
 
             long end = System.currentTimeMillis();
+            Thread.sleep(2000);
             generate_synced_list(syncedFilesPathSuffix, sb);
+            long time = end - start;
             System.out.print("\n====================================================");
-            System.out.print("\nSync complete, errors = " + errcount + " time = " + ((end - start) / 1000) + " seconds");
+            System.out.print("\nSync complete, errors = " + errcount + " time = " + msToStr(time));
             System.out.print("\n====================================================\n");
-            float time = ((end - start) / 1000);
-            obj.l3.setText(obj.l3_prefix + time + " seconds");
-            obj.l4.setText(obj.l4_prefix + "12 hours");
-            if (errcount < errcount_limit) {
-                JOptionPane.showMessageDialog(null, "Backup Completed Successfully");
-            }
+            obj.l3.setText(obj.l3_prefix + msToStr(time));
+            obj.l4.setText(obj.l4_prefix + msToStr(backup_interval_minutes * 60000));
 
         } catch (Exception e) {
             e.printStackTrace();
         }
+
+        last_backup = System.currentTimeMillis();
+
+        obj.l2.setText("COMPLETED");
+
+        while (System.currentTimeMillis() < last_backup + (backup_interval_minutes * 60000)) {
+            long ms = (backup_interval_minutes * 60000) - (System.currentTimeMillis() - last_backup);
+            obj.l4.setText(obj.l4_prefix + msToStr(ms));
+            try {
+                Thread.sleep(10000);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+
+        obj.l3.setText(obj.l3_prefix + " ongoing");
+        obj.l4.setText(obj.l4_prefix + " ongoing");
+        start_backup_service();
+
     }
 
     private static boolean checkNeedToDownload(fileRecord r) {
@@ -243,26 +287,26 @@ class downloader {
             //System.out.print("\nDownloading from " + ust);
             //open the connection
             URL url = new URL(ust);
-            URLConnection conection = url.openConnection();
-            conection.connect();
+            URLConnection connection = url.openConnection();
+            connection.setConnectTimeout(10000);
+            connection.setReadTimeout(10000);
+            connection.connect();
             //replace the "%20" with " " before writing data to file
             savePathSuffix = st.replace("%20", " ");
             //open input stream on the url
-            InputStream input = new BufferedInputStream(url.openStream(), 8192);
-            System.out.print("\nTrying to get " + savePathPrefix + savePathSuffix);
-            File yourFile = new File(savePathPrefix + savePathSuffix);
+            InputStream input = new BufferedInputStream(url.openStream(), BUFFER_SIZE);
+            String pathname = savePathPrefix + savePathSuffix;
+            System.out.print("\nTrying to get " + pathname);
+            File yourFile = new File(pathname);
             //create directories if required
             yourFile.getParentFile().mkdirs();
             //output stream
-            OutputStream output = new FileOutputStream(savePathPrefix + savePathSuffix);
+            OutputStream output = new FileOutputStream(pathname);
 
             byte data[] = new byte[BUFFER_SIZE];
 
-            long total = 0;
-
             //append data buffer to output stream till available
             while ((count = input.read(data)) != -1) {
-                total += count;
                 //writing data to file
                 output.write(data, 0, count);
             }
@@ -326,7 +370,7 @@ class downloader {
             }
             i++;
         }
-	//find fucking ip again and again till found
+        //find fucking ip again and again till found
         return find_mobile_ip();
     }
 
@@ -341,7 +385,7 @@ class downloader {
             URLConnection conection = url.openConnection();
             conection.setConnectTimeout(2000);
             conection.connect();
-            InputStream input = new BufferedInputStream(url.openStream(), 8192);
+            InputStream input = new BufferedInputStream(url.openStream(), BUFFER_SIZE);
             File yourFile = new File("configs/" + "temp.txt");
             yourFile.getParentFile().mkdirs();
             OutputStream output = new FileOutputStream(yourFile);
@@ -361,6 +405,24 @@ class downloader {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    static String msToStr(long z) {
+        String st = "";
+        z = z / 1000;
+        if (z < 60) {
+            st = "" + z + " sec";
+        } else if ((z >= 60) && (z < 3600)) {
+            int min = (int) (z / 60);
+            int sec = (int) (z - (min * 60));
+            st = "" + min + " min " + sec + " sec";
+        } else if (z >= 3600) {
+            int hr = (int) (z / 3600);
+            int min = (int) ((z - (hr * 3600)) / 60);
+            int sec = (int) (z - ((hr * 3600) + (min * 60)));
+            st = "" + hr + " hr " + min + " min " + sec + " sec";
+        }
+        return st;
     }
 
 }
