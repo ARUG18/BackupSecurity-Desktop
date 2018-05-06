@@ -41,14 +41,20 @@ class downloader {
     //record types
     private static int TYPE_FILESTOSYNC = 0;
     private static int TYPE_SYNCEDFILES = 1;
+    private static final int DOWNLOAD_THREADS = 2;
     //new is the latest list from mobile, old is the one we make from our data and tosync is for downloading
     private static ArrayList<fileRecord> list_new, list_old, list_tosync;
+    static String[] path, rawstring;
+    static Thread[] dthread;
+    static int thread_index = 0;
+    static StringBuilder sb;
+    static boolean[] downloaderFinished;
 
     public static void main(String[] args) {
         //prepare the gui
         obj.initialise();
         obj.pagestructure();
-	start_backup_service();
+        start_backup_service();
     }
 
     //separating this from main so that this can be called again after 12/24hr standby
@@ -64,7 +70,7 @@ class downloader {
         download_file(ftpSyncFilePathSuffix);
         //note the start time and prepare to start the sync
         long start = System.currentTimeMillis();
-        StringBuilder sb = new StringBuilder();
+        sb = new StringBuilder();
         try {
             //read all content from filestosync.txt
             File syncedfiles = new File(configPathPrefix + syncedFilesPathSuffix);
@@ -138,41 +144,8 @@ class downloader {
             obj.bar.setMinimum(0);
             obj.bar.setMaximum(list_tosync.size());
             //start downloading files which are needed
-            for (fileRecord f : list_tosync) {
-                String path = f.path;
-                String rawstring = f.raw;
-                boolean downloaded = false;
-                //replace the " " with "%20" before downloading files
-                path = path.replace(" ", "%20");
-                //Try to download the file
-                downloaded = download_file(path);
-                //Try to download the file again if failed
-                if (!downloaded) {
-                    downloaded = download_file(path);
-                }
-                //Giving up now, count this as an error
-                if (downloaded) {
-                    synced++;
-                    rawstring += " $#$# done\n";
-                    obj.l7.setText(obj.l7_prefix + String.valueOf(synced));
-                } else {
-                    errcount++;
-                    System.out.print("\nFailed to downlaod " + f.path);
-                    if (errcount >= errcount_limit) {
-                        //stop it, too many errors
-                        obj.bar.setString("Error");
-                        obj.l2.setBounds(150, 150, 400, 100);
-                        obj.l2.setText("Too many errors !");
-                        obj.l2.setForeground(Color.red);
-                        break;
-                    }
-                    rawstring += " $#$# failed\n";
-                }
-                obj.bar.setValue(synced + errcount);
-                obj.bar.setString((100 * (synced + errcount) / list_tosync.size()) + " %");
-                sb.append(rawstring);
-            }
-
+            downloadThreadScheduler();
+            //downloading has finished, do end stuff
             long end = System.currentTimeMillis();
             generate_synced_list(syncedFilesPathSuffix, sb);
             System.out.print("\n====================================================");
@@ -189,6 +162,78 @@ class downloader {
             e.printStackTrace();
         }
     }
+
+    private static void downloadThreadScheduler() {
+        dthread = new Thread[DOWNLOAD_THREADS];
+        path = new String[DOWNLOAD_THREADS];
+        rawstring = new String[DOWNLOAD_THREADS];
+        downloaderFinished = new boolean[DOWNLOAD_THREADS+1];
+        for(thread_index = 0 ; thread_index < DOWNLOAD_THREADS ; thread_index++)
+        {
+            final int th_indx = thread_index;
+            dthread[th_indx] = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    for(int i = 0 ; i < list_tosync.size() ; i++) {
+                        //skip the job which is already taken by another thread
+                        if(list_tosync.get(i).inProgressOrDone){
+                            continue;
+                        }
+                        list_tosync.get(i).inProgressOrDone = true;
+                        path[th_indx] = list_tosync.get(i).path;
+                        rawstring[th_indx] = list_tosync.get(i).raw;
+                        boolean downloaded;
+                        //replace the " " with "%20" before downloading files
+                        path[th_indx] = path[th_indx].replace(" ", "%20");
+                        //Try to download the file
+                        downloaded = download_file(path[th_indx]);
+                        //Try to download the file again if failed
+                        if (!downloaded) {
+                            downloaded = download_file(path[th_indx]);
+                        }
+                        //Giving up now, count this as an error
+                        if (downloaded) {
+                            synced++;
+                            rawstring[th_indx] += " $#$# done\n";
+                            obj.l7.setText(obj.l7_prefix + String.valueOf(synced));
+                        } else {
+                            errcount++;
+                            System.out.print("\nFailed to downlaod " + list_tosync.get(i).path);
+                            if (errcount >= errcount_limit) {
+                                //stop it, too many errors
+                                obj.bar.setString("Error");
+                                obj.l2.setBounds(150, 150, 400, 100);
+                                obj.l2.setText("Too many errors !");
+                                obj.l2.setForeground(Color.red);
+                                downloaderFinished[th_indx] = true;
+                                break;
+                            }
+                            rawstring[th_indx] += " $#$# failed\n";
+                        }
+                        obj.bar.setValue(synced + errcount);
+                        obj.bar.setString((100 * (synced + errcount) / list_tosync.size()) + " %");
+                        sb.append(rawstring[th_indx]);
+                        /*try {
+                            Thread.sleep(100);
+                        } catch (InterruptedException e) {
+                            e.printStackTrace();
+                        }*/
+                    }
+                    downloaderFinished[th_indx] = true;
+                }
+            });
+            dthread[th_indx].start();
+        }
+        while(!downloaderFinished[DOWNLOAD_THREADS]){
+            int i = 0;
+            downloaderFinished[DOWNLOAD_THREADS] = true;
+            while(i < DOWNLOAD_THREADS) {
+                downloaderFinished[DOWNLOAD_THREADS] = downloaderFinished[DOWNLOAD_THREADS] && downloaderFinished[i];
+                i++;
+            }
+        }
+    }
+
 
     private static boolean checkNeedToDownload(fileRecord r) {
         if (list_old == null || list_old.size() < 1) {
@@ -236,45 +281,38 @@ class downloader {
         }
     }
 
-    private static synchronized boolean download_file(String st) {
+    private static boolean download_file(String st) {
         int count;
         try {
             String ust = ftpFilePathPrefix + st;
             //System.out.print("\nDownloading from " + ust);
             //open the connection
             URL url = new URL(ust);
-            URLConnection conection = url.openConnection();
-            conection.connect();
+            URLConnection connection = url.openConnection();
+            connection.setConnectTimeout(10000);
+            //connection.setReadTimeout(10000);
+            connection.connect();
             //replace the "%20" with " " before writing data to file
-            savePathSuffix = st.replace("%20", " ");
+            String downloadPathSuffix = st.replace("%20", " ");
             //open input stream on the url
             InputStream input = new BufferedInputStream(url.openStream(), 8192);
-            System.out.print("\nTrying to get " + savePathPrefix + savePathSuffix);
-            File yourFile = new File(savePathPrefix + savePathSuffix);
+            System.out.print("\nTrying to get " + savePathPrefix + downloadPathSuffix);
+            File yourFile = new File(savePathPrefix + downloadPathSuffix);
             //create directories if required
             yourFile.getParentFile().mkdirs();
             //output stream
-            OutputStream output = new FileOutputStream(savePathPrefix + savePathSuffix);
-
+            OutputStream output = new FileOutputStream(savePathPrefix + downloadPathSuffix);
             byte data[] = new byte[BUFFER_SIZE];
-
-            long total = 0;
-
             //append data buffer to output stream till available
             while ((count = input.read(data)) != -1) {
-                total += count;
-                //writing data to file
                 output.write(data, 0, count);
             }
-
             //flushing output
             output.flush();
-
             //closing streams
             output.close();
             input.close();
             System.out.print("\nDone !");
-
             //return true so that we know it's success
             return true;
         } catch (Exception e) {
@@ -326,7 +364,7 @@ class downloader {
             }
             i++;
         }
-	//find fucking ip again and again till found
+        //find fucking ip again and again till found
         return find_mobile_ip();
     }
 
@@ -369,6 +407,7 @@ class fileRecord {
     String path = null;
     String raw = null;
     boolean success = false;
+    boolean inProgressOrDone = false;
     int rectype = -1;
     int year = -1;
     int month = -1;
@@ -376,3 +415,4 @@ class fileRecord {
     int hr = -1;
     int min = -1;
 }
+
