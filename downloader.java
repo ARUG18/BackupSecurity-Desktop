@@ -16,7 +16,8 @@ import java.util.Scanner;
 import javax.swing.JOptionPane;
 
 class downloader {
-    final static int backup_interval_minutes = 4;
+    //backup is performed after every these number of minutes
+    final static int backup_interval_minutes = 5;
     //this is for byte array when downloading
     private static final int BUFFER_SIZE = 65536;
     //prepare downloader ui
@@ -51,6 +52,7 @@ class downloader {
         //prepare the gui
         obj.initialise();
         obj.pagestructure();
+        //start recursive backup service
         start_backup_service();
     }
 
@@ -66,7 +68,7 @@ class downloader {
         obj.l2.setText("Waiting for connection");
         String mob_ip = find_mobile_ip();
         ftpFilePathPrefix = "ftp://" + mob_ip + ":12345/";
-        obj.l2.setBounds(150, 150, 400, 100);
+        //obj.l2.setBounds(150, 150, 400, 100);
         obj.l2.setForeground(new Color(90, 145, 90));
         obj.l2.setText("CONNECTED");
         System.out.print("\n==== ip of mobile is " + mob_ip + " ====");
@@ -180,13 +182,6 @@ class downloader {
                         } else {
                             errcount++;
                             System.out.print("\nFailed to downlaod " + f.path);
-                            if (errcount >= errcount_limit) {
-                                //stop it, too many errors
-                                obj.bar.setString("Error");
-                                obj.l2.setBounds(150, 150, 400, 100);
-                                obj.l2.setText("Too many errors !");
-                                obj.l2.setForeground(Color.red);
-                            }
                             rawstring += " $#$# failed\n";
                         }
                         obj.bar.setValue(synced + errcount);
@@ -216,7 +211,13 @@ class downloader {
 
         last_backup = System.currentTimeMillis();
 
-        obj.l2.setText("COMPLETED");
+        if ((errcount < errcount_limit)&&(errcount <= list_tosync.size()/2)) {
+            obj.l2.setText("COMPLETED");
+        } else {
+            obj.bar.setString("Error");
+            obj.l2.setText("Too many errors, try again !");
+            obj.l2.setForeground(Color.red);
+        }
 
         while (System.currentTimeMillis() < last_backup + (backup_interval_minutes * 60000)) {
             long ms = (backup_interval_minutes * 60000) - (System.currentTimeMillis() - last_backup);

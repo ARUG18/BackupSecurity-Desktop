@@ -22,6 +22,7 @@ public class downloaderUI implements ActionListener {
         frame = new JFrame();
         frame.setVisible(true);
         frame.setSize(700, 600);
+	frame.setTitle("Backup & Security");
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         p1 = new JPanel();
         p1.setSize(700, 600);
